@@ -13,6 +13,7 @@ from triton.testing import do_bench
 
 from torchao.prototype.mx_formats.config import ScaleCalculationMode
 from torchao.prototype.mx_formats.kernels import (
+    mxfp8_quantize_cuda,
     triton_to_mxfp8_dim0,
     triton_to_mxfp8_dim1,
 )
@@ -120,6 +121,8 @@ def run(
         "dim1_mxfp8_triton_floor",
         "dim1_mxfp8_cuda_floor",
         "dim1_mxfp8_cuda_rceil",
+        "dim1_mxfp8_rocm_floor",
+        "dim1_mxfp8_rocm_rceil",
     )
 
     x = torch.randn(M, K, dtype=torch.bfloat16, device="cuda") * 1000
@@ -391,8 +394,54 @@ def run(
         bps = (bytes_r + bytes_w) / (time_us / 1e6)
 
     elif mode == "dim1_mxfp8_cuda_rceil":
-        from torchao.prototype.mx_formats.kernels import mxfp8_quantize_cuda
+        _, y_d1, _, s_d1 = mxfp8_quantize_cuda(
+            x, rowwise=False, colwise=True, scaling_mode="rceil"
+        )
 
+        for _ in range(2):
+            __ = mxfp8_quantize_cuda(
+                x, rowwise=False, colwise=True, scaling_mode="rceil"
+            )
+
+        time_us = benchmark_cuda_function_in_microseconds(
+            lambda x: mxfp8_quantize_cuda(
+                x, rowwise=False, colwise=True, scaling_mode="rceil"
+            ),
+            x,
+        )
+
+        assert y_d1.dtype == torch.float8_e4m3fn
+        assert s_d1.dtype == torch.float8_e8m0fnu
+
+        bytes_r = x.numel() * bytes_per_el_bf16
+        bytes_w = (y_d1.numel() + s_d1.numel()) * bytes_per_el_fp8
+        bps = (bytes_r + bytes_w) / (time_us / 1e6)
+
+    elif mode == "dim1_mxfp8_rocm_floor":
+        _, y_d1, _, s_d1 = mxfp8_quantize_cuda(
+            x, rowwise=False, colwise=True, scaling_mode="floor"
+        )
+
+        for _ in range(2):
+            __ = mxfp8_quantize_cuda(
+                x, rowwise=False, colwise=True, scaling_mode="floor"
+            )
+
+        time_us = benchmark_cuda_function_in_microseconds(
+            lambda x: mxfp8_quantize_cuda(
+                x, rowwise=False, colwise=True, scaling_mode="floor"
+            ),
+            x,
+        )
+
+        assert y_d1.dtype == torch.float8_e4m3fn
+        assert s_d1.dtype == torch.float8_e8m0fnu
+
+        bytes_r = x.numel() * bytes_per_el_bf16
+        bytes_w = (y_d1.numel() + s_d1.numel()) * bytes_per_el_fp8
+        bps = (bytes_r + bytes_w) / (time_us / 1e6)
+
+    elif mode == "dim1_mxfp8_rocm_rceil":
         _, y_d1, _, s_d1 = mxfp8_quantize_cuda(
             x, rowwise=False, colwise=True, scaling_mode="rceil"
         )
